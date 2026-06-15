@@ -2,21 +2,27 @@
 
 A hub landing zone deployed entirely as code, reused unchanged across environments.
 
-```
-                       ┌─────────────────────────────────────────────┐
-                       │  Subscription (per environment)              │
-                       │                                              │
-                       │   rg-ctso-platform-<env>-uks-001             │
-                       │   ├── Log Analytics workspace (diagnostics)  │
-                       │   ├── Azure Policy: require standard tags     │
-                       │   └── Hub VNet  vnet-...-<env>-...           │
-                       │        ├── AzureFirewallSubnet  (no NSG)      │
-                       │        ├── GatewaySubnet        (no NSG)      │
-                       │        ├── snet-shared          (NSG)         │
-                       │        └── snet-privatelink     (NSG, PE pol  │
-                       │                                  disabled)    │
-                       │        NSG: allow intra-VNet, deny Internet   │
-                       └─────────────────────────────────────────────┘
+```mermaid
+graph TB
+    TF["Terraform / CI"]
+    subgraph SUB["Azure Subscription - per environment"]
+        subgraph RG["Resource Group: rg-org-platform-env-uks-001"]
+            POL["Azure Policy<br/>deny missing required tags"]
+            LAW["Log Analytics<br/>diagnostics and retention"]
+            subgraph VNET["Hub VNet 10.x.0.0/16"]
+                AFW["AzureFirewallSubnet (no NSG)"]
+                GW["GatewaySubnet (no NSG)"]
+                SH["snet-shared<br/>service endpoints"]
+                PL["snet-privatelink<br/>private endpoints"]
+            end
+            NSG["NSG<br/>allow intra-VNet, deny Internet"]
+        end
+    end
+    TF --> RG
+    NSG -. associated .-> SH
+    NSG -. associated .-> PL
+    SH -- logs --> LAW
+    PL -- logs --> LAW
 ```
 
 ## Design decisions

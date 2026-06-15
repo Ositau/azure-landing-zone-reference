@@ -12,6 +12,60 @@ automation-first, CAF-aligned, and drift-free across environments.
 
 ---
 
+## Architecture
+
+```mermaid
+graph TB
+    TF["Terraform / CI - provisions everything as code"]
+    subgraph SUB["Azure Subscription - one per environment"]
+        subgraph RG["Resource Group: rg-org-platform-env-uks-001"]
+            POL["Azure Policy<br/>deny resources missing required tags"]
+            LAW["Log Analytics<br/>diagnostics and retention"]
+            subgraph VNET["Hub VNet 10.x.0.0/16"]
+                AFW["AzureFirewallSubnet (no NSG)"]
+                GW["GatewaySubnet (no NSG)"]
+                SH["snet-shared<br/>service endpoints"]
+                PL["snet-privatelink<br/>private endpoints"]
+            end
+            NSG["NSG<br/>allow intra-VNet, deny Internet"]
+        end
+    end
+    TF --> RG
+    NSG -. associated .-> SH
+    NSG -. associated .-> PL
+    SH -- logs --> LAW
+    PL -- logs --> LAW
+
+    classDef policy fill:#3b2f5e,stroke:#8b5cf6,color:#fff;
+    classDef net fill:#0d3b4f,stroke:#22d3ee,color:#fff;
+    class POL,NSG policy;
+    class AFW,GW,SH,PL net;
+```
+
+## Delivery pipeline
+
+```mermaid
+flowchart LR
+    PUSH["git push / PR"] --> FMT["fmt"] --> VAL["validate"] --> LINT["tflint"] --> SEC["Checkov scan"] --> PLAN["plan"]
+    PLAN --> GATE{"manual approval"}
+    GATE -- approved --> APPLY["terraform apply"] --> AZ["Azure landing zone"]
+```
+
+## Module composition
+
+```mermaid
+graph LR
+    ROOT["environments/dev and prod<br/>thin root + tfvars + backend"]
+    ROOT --> NAMING["module: naming<br/>CAF-aligned names"]
+    ROOT --> GOV["module: governance<br/>RG, Log Analytics, tag policy"]
+    ROOT --> NET["module: networking<br/>VNet, subnets, NSG"]
+    NAMING -. names .-> GOV
+    NAMING -. names .-> NET
+    GOV -. workspace id .-> NET
+```
+
+---
+
 ## What it demonstrates
 
 - **Infrastructure as Code** — Terraform 1.6+, azurerm v4, reusable modules with
