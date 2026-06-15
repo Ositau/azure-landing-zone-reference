@@ -1,0 +1,84 @@
+# Azure DevOps multi-stage pipeline: Validate -> Plan -> Apply, with a manual
+# approval gate before apply (configured on the 'prod' environment in ADO).
+# Auth uses an ARM service connection + OIDC workload identity (no stored secrets).
+
+trigger:
+  branches:
+    include: [main]
+
+variables:
+  - name: tfVersion
+    value: 1.9.8
+  - name: workingDir
+    value: environments/prod
+  - group: tf-backend # contains backend storage details
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Validate
+    jobs:
+      - job: validate
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(tfVersion)
+          - script: terraform fmt -check -recursive
+            displayName: fmt
+          - script: terraform init -backend=false
+            workingDirectory: $(workingDir)
+            displayName: init
+          - script: terraform validate
+            workingDirectory: $(workingDir)
+            displayName: validate
+
+  - stage: Plan
+    dependsOn: Validate
+    jobs:
+      - job: plan
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(tfVersion)
+          - task: TerraformTaskV4@4
+            displayName: init
+            inputs:
+              command: init
+              workingDirectory: $(workingDir)
+              backendServiceArm: arm-prod
+              backendAzureRmResourceGroupName: $(backendResourceGroup)
+              backendAzureRmStorageAccountName: $(backendStorageAccount)
+              backendAzureRmContainerName: tfstate
+              backendAzureRmKey: platform/prod.terraform.tfstate
+          - task: TerraformTaskV4@4
+            displayName: plan
+            inputs:
+              command: plan
+              workingDirectory: $(workingDir)
+              environmentServiceNameAzureRM: arm-prod
+              commandOptions: -out=tfplan
+          - publish: $(workingDir)/tfplan
+            artifact: tfplan
+
+  - stage: Apply
+    dependsOn: Plan
+    jobs:
+      - deployment: apply
+        environment: prod # manual approval gate attached here
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: tfplan
+                - task: TerraformInstaller@1
+                  inputs:
+                    terraformVersion: $(tfVersion)
+                - task: TerraformTaskV4@4
+                  displayName: apply
+                  inputs:
+                    command: apply
+                    workingDirectory: $(workingDir)
+                    environmentServiceNameAzureRM: arm-prod
+                    commandOptions: $(Pipeline.Workspace)/tfplan/tfplan
